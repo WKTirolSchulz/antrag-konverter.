@@ -3,137 +3,104 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Förderanträge Excel zu Word Konverter</title>
+  <title>Förderanträge Konverter</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/docxtemplater/3.37.11/docxtemplater.js"></script>
+  <script src="https://unpkg.com/pizzip@3.1.4/dist/pizzip.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; max-width: 650px; margin: 50px auto; padding: 20px; background: #f1f5f9; color: #0f172a; }
-    .card { background: white; padding: 32px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
-    h2 { margin-top: 0; color: #1e293b; }
-    .file-input { margin: 24px 0; padding: 16px; border: 2px dashed #cbd5e1; border-radius: 8px; text-align: center; background: #f8fafc; }
-    input[type="file"] { display: none; }
-    label.upload-btn { background: #e2e8f0; color: #334155; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 600; }
-    label.upload-btn:hover { background: #cbd5e1; }
-    #fileName { margin-top: 10px; font-size: 0.9em; color: #64748b; }
-    button.action-btn { width: 100%; background: #0284c7; color: white; border: none; padding: 12px; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 1rem; }
-    button.action-btn:disabled { background: #94a3b8; cursor: not-allowed; }
-    button.action-btn:hover:not(:disabled) { background: #0369a1; }
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #f8fafc; }
+    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .field { margin-bottom: 20px; }
+    label { font-weight: bold; display: block; margin-bottom: 6px; }
+    input[type="file"] { display: block; width: 100%; }
+    button { background: #0284c7; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; }
+    button:disabled { background: #94a3b8; cursor: not-allowed; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Förder-Anträge Konverter (Tirol)</h2>
-    <p>Lade die Excel-Datei (<i>Digitalisierung von Geschäftsprozessen...</i>) hoch, um die Word-Beurteilungstabelle zu erstellen.</p>
+    <h2>Förderanträge Konverter</h2>
     
-    <div class="file-input">
-      <label for="excelInput" class="upload-btn">Excel-Datei auswählen</label>
-      <input type="file" id="excelInput" accept=".xlsx, .xls" />
-      <div id="fileName">Keine Datei ausgewählt</div>
+    <div class="field">
+      <label>1. Word-Vorlage (.docx):</label>
+      <input type="file" id="templateInput" accept=".docx" />
     </div>
 
-    <button id="convertBtn" class="action-btn" disabled>Word-Dokument generieren</button>
+    <div class="field">
+      <label>2. Excel-Daten (.xls / .xlsx):</label>
+      <input type="file" id="excelInput" accept=".xlsx, .xls" />
+    </div>
+
+    <button id="convertBtn" disabled>Word-Dokument im Original-Design erstellen</button>
   </div>
 
   <script>
-    let parsedData = null;
+    let templateArrayBuffer = null;
+    let excelData = null;
 
+    const convertBtn = document.getElementById('convertBtn');
+
+    function checkReady() {
+      convertBtn.disabled = !(templateArrayBuffer && excelData);
+    }
+
+    // Word Vorlage einlesen
+    document.getElementById('templateInput').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      templateArrayBuffer = await file.arrayBuffer();
+      checkReady();
+    });
+
+    // Excel Daten einlesen
     document.getElementById('excelInput').addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
-      document.getElementById('fileName').textContent = file.name;
-      
       const buffer = await file.arrayBuffer();
       const workbook = XLSX.read(buffer);
       const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      parsedData = XLSX.utils.sheet_to_json(firstSheet);
-      
-      document.getElementById('convertBtn').disabled = false;
+      excelData = XLSX.utils.sheet_to_json(firstSheet);
+      checkReady();
     });
 
-    document.getElementById('convertBtn').addEventListener('click', () => {
-      if (!parsedData) return;
-      
-      const { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, AlignmentType, PageOrientation } = docx;
+    // Konvertierung durchführen
+    convertBtn.addEventListener('click', () => {
+      if (!templateArrayBuffer || !excelData) return;
 
-      // Header Zeile 1
-      const headerRow1 = new TableRow({
-        children: [
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Land-nummer", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Fördernehmer", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Vertretungs-bef. Organ", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Berechtigung", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Förderaktion", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Förder-höhe %", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Auftragsnr WK", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "KUR", bold: true })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Einverständnis WK", bold: true })] }),
-          new TableCell({ columnSpan: 2, children: [new Paragraph({ text: "Beurteilung Land", bold: true, alignment: AlignmentType.CENTER })] }),
-          new TableCell({ rowSpan: 2, children: [new Paragraph({ text: "Begründung", bold: true })] }),
-        ]
-      });
-
-      // Header Zeile 2 (Sub-Header Positiv/Negativ)
-      const headerRow2 = new TableRow({
-        children: [
-          new TableCell({ children: [new Paragraph({ text: "Positiv", bold: true, alignment: AlignmentType.CENTER })] }),
-          new TableCell({ children: [new Paragraph({ text: "Negativ", bold: true, alignment: AlignmentType.CENTER })] }),
-        ]
-      });
-
-      // Datenzeilen generieren
-      const dataRows = parsedData.map((row, index) => {
-        const vertreter = [row["Vorname"], row["Name"]].filter(Boolean).join(" ");
+      // Excel-Daten für das Template aufbereiten
+      const rows = excelData.map((row, index) => {
         const isFreigegeben = String(row["Status"] || "").toLowerCase() === "freigegeben";
+        const vertreter = [row["Vorname"], row["Name"]].filter(Boolean).join(" ");
 
-        return new TableRow({
-          children: [
-            new TableCell({ children: [new Paragraph(String(index + 1))] }), // Land-nummer (1, 2, 3...)
-            new TableCell({ children: [new Paragraph(String(row["Firmenname"] || ""))] }),
-            new TableCell({ children: [new Paragraph(vertreter)] }),
-            new TableCell({ children: [new Paragraph(String(row["Branche"] || ""))] }),
-            new TableCell({ children: [new Paragraph("Digitalisierung")] }), // Förderaktion
-            new TableCell({ children: [new Paragraph(String(row["Förderung"] || ""))] }),
-            new TableCell({ children: [new Paragraph(String(row["Mitgliedsnummer"] || ""))] }),
-            new TableCell({ children: [new Paragraph("")] }), // KUR
-            new TableCell({ children: [new Paragraph(isFreigegeben ? "ja" : "")] }), // Einverständnis WK
-            new TableCell({ children: [new Paragraph(isFreigegeben ? "X" : "")] }), // Positiv
-            new TableCell({ children: [new Paragraph(!isFreigegeben ? "X" : "")] }), // Negativ
-            new TableCell({ children: [new Paragraph("")] }), // Begründung
-          ]
-        });
+        return {
+          nr: index + 1,
+          firma: row["Firmenname"] || "",
+          vertreter: vertreter,
+          branche: row["Branche"] || "",
+          aktion: "Digitalisierung",
+          betrag: row["Förderung"] || "",
+          auftrag: row["Mitgliedsnummer"] || "",
+          kur: "",
+          einverstaendnis: isFreigegeben ? "ja" : "",
+          pos: isFreigegeben ? "X" : "",
+          neg: !isFreigegeben ? "X" : "",
+          begruendung: ""
+        };
       });
 
-      const doc = new Document({
-        sections: [{
-          properties: {
-            page: { orientation: PageOrientation.LANDSCAPE }
-          },
-          children: [
-            new Paragraph({
-              text: "Beurteilung der von der Wirtschaftskammer Tirol vorgelegten Beratungsfälle durch das Amt der Tiroler Landesregierung, Abteilung Wirtschaftsförderung und Fördertransparenz",
-              bold: true,
-              space: { after: 200 }
-            }),
-            new Paragraph({
-              text: "Auftrag: Betriebsanlagenberatungen",
-              bold: true,
-              space: { after: 300 }
-            }),
-            new Table({
-              rows: [headerRow1, headerRow2, ...dataRows],
-              width: { size: 100, type: WidthType.PERCENTAGE },
-            })
-          ],
-        }],
+      // docxtemplater ausführen
+      const zip = new PizZip(templateArrayBuffer);
+      const doc = new window.docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+
+      doc.render({ rows: rows });
+
+      const blob = doc.getZip().generate({
+        type: "blob",
+        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       });
 
-      Packer.toBlob(doc).then(blob => {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = 'Anträge_Beurteilung_Land.docx';
-        a.click();
-      });
+      saveAs(blob, "Anträge_Beurteilung_Land_ORIGINAL.docx");
     });
   </script>
 </body>
