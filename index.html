@@ -9,13 +9,15 @@
   <script src="https://unpkg.com/pizzip@3.1.4/dist/pizzip.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #f8fafc; }
-    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; background: #f8fafc; color: #0f172a; }
+    .card { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); }
+    h2 { margin-top: 0; color: #1e293b; }
     .field { margin-bottom: 20px; }
     label { font-weight: bold; display: block; margin-bottom: 6px; }
-    input[type="file"] { display: block; width: 100%; }
-    button { background: #0284c7; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; }
+    input[type="file"] { display: block; width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+    button { background: #0284c7; color: white; border: none; padding: 12px 24px; border-radius: 6px; font-weight: bold; cursor: pointer; width: 100%; font-size: 1rem; margin-top: 10px; }
     button:disabled { background: #94a3b8; cursor: not-allowed; }
+    #errorBox { margin-top: 15px; padding: 12px; background: #fef2f2; border: 1px solid #fca5a5; color: #991b1b; border-radius: 6px; display: none; font-size: 0.9em; white-space: pre-wrap; }
   </style>
 </head>
 <body>
@@ -32,7 +34,9 @@
       <input type="file" id="excelInput" accept=".xlsx, .xls" />
     </div>
 
-    <button id="convertBtn" disabled>Word-Dokument im Original-Design erstellen</button>
+    <button id="convertBtn" disabled>Word-Dokument generieren</button>
+
+    <div id="errorBox"></div>
   </div>
 
   <script>
@@ -40,67 +44,100 @@
     let excelData = null;
 
     const convertBtn = document.getElementById('convertBtn');
+    const errorBox = document.getElementById('errorBox');
+
+    function showError(msg) {
+      errorBox.style.display = 'block';
+      errorBox.textContent = "Fehler:\n" + msg;
+    }
+
+    function clearError() {
+      errorBox.style.display = 'none';
+      errorBox.textContent = '';
+    }
 
     function checkReady() {
       convertBtn.disabled = !(templateArrayBuffer && excelData);
     }
 
-    // Word Vorlage einlesen
+    // Hilfsfunktion: Sucht flexibel nach Excel-Spalten und vermeidet 'undefined'
+    function getVal(row, keys) {
+      for (let k of keys) {
+        if (row[k] !== undefined && row[k] !== null) {
+          return String(row[k]).trim();
+        }
+      }
+      return "";
+    }
+
     document.getElementById('templateInput').addEventListener('change', async (e) => {
+      clearError();
       const file = e.target.files[0];
       if (!file) return;
       templateArrayBuffer = await file.arrayBuffer();
       checkReady();
     });
 
-    // Excel Daten einlesen
     document.getElementById('excelInput').addEventListener('change', async (e) => {
+      clearError();
       const file = e.target.files[0];
       if (!file) return;
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer);
-      const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-      excelData = XLSX.utils.sheet_to_json(firstSheet);
-      checkReady();
+      try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer);
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        excelData = XLSX.utils.sheet_to_json(firstSheet);
+        checkReady();
+      } catch (err) {
+        showError("Excel-Datei konnte nicht gelesen werden: " + err.message);
+      }
     });
 
-    // Konvertierung durchführen
     convertBtn.addEventListener('click', () => {
       if (!templateArrayBuffer || !excelData) return;
+      clearError();
 
-      // Excel-Daten für das Template aufbereiten
-      const rows = excelData.map((row, index) => {
-        const isFreigegeben = String(row["Status"] || "").toLowerCase() === "freigegeben";
-        const vertreter = [row["Vorname"], row["Name"]].filter(Boolean).join(" ");
+      try {
+        // Mappe die Excel-Zeilen auf dein Template
+        const rows = excelData.map((row) => {
+          const status = getVal(row, ["Status", "status"]);
+          const isFreigegeben = status.toLowerCase() === "freigegeben";
 
-        return {
-          nr: index + 1,
-          firma: row["Firmenname"] || "",
-          vertreter: vertreter,
-          branche: row["Branche"] || "",
-          aktion: "Digitalisierung",
-          betrag: row["Förderung"] || "",
-          auftrag: row["Mitgliedsnummer"] || "",
-          kur: "",
-          einverstaendnis: isFreigegeben ? "ja" : "",
-          pos: isFreigegeben ? "X" : "",
-          neg: !isFreigegeben ? "X" : "",
-          begruendung: ""
-        };
-      });
+          const vorname = getVal(row, ["Vorname", "vorname"]);
+          const nachname = getVal(row, ["Name", "Nachname", "name"]);
+          const vertreter = [vorname, nachname].filter(Boolean).join(" ");
 
-      // docxtemplater ausführen
-      const zip = new PizZip(templateArrayBuffer);
-      const doc = new window.docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
+          return {
+            firma: getVal(row, ["Firmenname", "Firma", "firmenname"]),
+            vertreter: vertreter,
+            branche: getVal(row, ["Branche", "branche"]),
+            aktion: "Digitalisierung",
+            betrag: getVal(row, ["Förderung", "Betrag", "förderung"]),
+            kur: "",
+            einverstaendnis: isFreigegeben ? "ja" : ""
+          };
+        });
 
-      doc.render({ rows: rows });
+        const zip = new PizZip(templateArrayBuffer);
+        const doc = new window.docxtemplater(zip, {
+          paragraphLoop: true,
+          linebreaks: true,
+          delimiters: { start: '{', end: '}' }
+        });
 
-      const blob = doc.getZip().generate({
-        type: "blob",
-        mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-      });
+        // Befülle die Template-Schleife {#rows} ... {/rows}
+        doc.render({ rows: rows });
 
-      saveAs(blob, "Anträge_Beurteilung_Land_ORIGINAL.docx");
+        const blob = doc.getZip().generate({
+          type: "blob",
+          mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        });
+
+        saveAs(blob, "Anträge_Beurteilung_Land_Ergebnis.docx");
+      } catch (err) {
+        console.error(err);
+        showError(err.message || JSON.stringify(err));
+      }
     });
   </script>
 </body>
